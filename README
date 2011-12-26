@@ -1,0 +1,11 @@
+Audicorr - The Audio Correlator
+===============================
+
+This simple peace of software computes cross correlation between two PCM WAV
+signals - small needle and a bigger haystack. It shows exact time, when needle
+starts in the haystack. The purpose is to find right cut points in radio/TV show
+recordings.
+
+At this moment, first prototype is build, not for production use.
+
+Copyright 2010 Ondrej Caletka <Ondrej.Caletka@gmail.com>
