@@ -31,8 +31,6 @@ char needle_fname[] = "needle.wav";
 double match_treshold = 0.95;
 
 
-fftw_complex *needle_spec;
-fftw_complex *haystack_spec;
 
 
 void check_wave_header(struct WAV_HEADER *wav_hdr) {
@@ -107,11 +105,13 @@ int main(int argc, char *argv[])
 {
 	FILE *fneedle, *fhaystack = stdin;
 	struct WAV_HEADER needle_hdr, haystack_hdr;
-	long n_needle, n, max_n;
+	long n_needle, n, max_n, n0;
 	fftw_plan plan, backplan;
-	double *needle_sig, *haystack_sig;
+	fftw_complex *needle_spec, *haystack_spec;
+	double *needle_sig, *haystack_sig, *haystack_safe;
 	double needle_energy, max_energy, match_time;
 
+	/* Prepare the needle */
 	fneedle = fopen(needle_fname, "r");
 	if (fneedle == NULL) {
 		perror("Cannot open needle file");
@@ -122,9 +122,9 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	check_wave_header(&needle_hdr);
-	puts("Checked needle OK");
+	
 	n_needle = getNsamples(&needle_hdr);
-	nfft = (long) pow(2, 19); /* TODO autodetect */
+	nfft = (long) pow(2, 18); /* TODO autodetect */
 
 	needle_spec = (fftw_complex*) fftw_malloc((nfft/2+1) * sizeof(fftw_complex));
 	if (needle_spec == NULL) {
@@ -135,6 +135,7 @@ int main(int argc, char *argv[])
 
 	puts("Preparing FFT");
 	plan = fftw_plan_dft_r2c_1d(nfft, needle_sig, needle_spec, FFTW_ESTIMATE);
+	memset((void *) needle_spec, 0, (nfft/2+1) * sizeof(fftw_complex));
 	n_needle = read_wav_data(fneedle, &needle_hdr, needle_sig, nfft);
 	needle_energy = 0;
 	for (n=0; n<n_needle; n++) {
@@ -145,11 +146,14 @@ int main(int argc, char *argv[])
 	fftw_execute(plan);
 	fftw_destroy_plan(plan);
 
-	/* Prepare the complex conjugate */
+	/* Prepare the complex conjugate of needle */
 	for(n=0; n<(nfft/2+1); n++) {
 		needle_spec[n] = conj(needle_spec[n]);
 	}
 
+	printf("Needle length: %ld\nFFT length:%ld\n", n_needle, nfft);
+
+	/* Prepare the haystack */
 	fhaystack = fopen("haystack.wav", "r");
 	if (fhaystack == NULL) {
 		perror("Cannot open haystack file");
@@ -160,47 +164,80 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	check_wave_header(&haystack_hdr);
-	puts("Checked haystack OK");
 	haystack_spec = (fftw_complex*) fftw_malloc((nfft/2+1) * sizeof(fftw_complex));
 	if (haystack_spec == NULL) {
 		perror("Allocation failed");
 		exit(EXIT_FAILURE);
 	}
 	haystack_sig = (double *) haystack_spec;
-
 	puts("Preparing FFT");
 	plan = fftw_plan_dft_r2c_1d(nfft, haystack_sig, haystack_spec, FFTW_ESTIMATE);
-	read_wav_data(fhaystack, &haystack_hdr, haystack_sig, nfft);
-	puts("Computing FFT");
-	fftw_execute(plan);
-
 	puts("Preparing iFFT");
-	/* TODO - FFTW_MEASURE would kill values */
 	backplan = fftw_plan_dft_c2r_1d(nfft, haystack_spec, haystack_sig, FFTW_ESTIMATE);
+	memset((void *) haystack_spec, 0, (nfft/2+1) * sizeof(fftw_complex));
 
-	//xcorr(X,Y) = ifft( fft(X) * conj(fft(Y)) )
-	for(n=0; n<(nfft/2+1); n++) {
-		haystack_spec[n] *= needle_spec[n];
+	/* haystack_safe is used to store last n_needle samples of haystack for
+	 * overlaps between iterations
+	 */
+	haystack_safe = (double *) fftw_malloc(n_needle * sizeof(double));
+	if (haystack_safe == NULL) {
+		perror("Allocation failed");
+		exit(EXIT_FAILURE);
 	}
-	puts("Computing iFFT");
-	fftw_execute(backplan);
-	max_n = -1;
-	max_energy = 0;
-	for(n=0; n<nfft; n++) {
-		if (max_energy < haystack_sig[n]) {
-			max_energy = haystack_sig[n];
-			max_n = n;
+	
+	read_wav_data(fhaystack, &haystack_hdr, haystack_sig, nfft);
+	memcpy((void *) haystack_safe, (void *) (haystack_sig+nfft-1-n_needle),
+			n_needle * sizeof(double));
+	n0 = 0;
+	while (1) {
+		puts("Computing FFT");
+		fftw_execute(plan);
+
+		//xcorr(X,Y) = ifft( fft(X) * conj(fft(Y)) )
+		for(n=0; n<(nfft/2+1); n++) {
+			haystack_spec[n] *= needle_spec[n];
 		}
-	}
-	max_energy /= nfft * needle_energy; /* Normalize maximum energy to 1.0 */
-	match_time = ((double) max_n) / needle_hdr.SampleRate;
+		puts("Computing iFFT");
+		fftw_execute(backplan);
+		max_n = -1;
+		max_energy = 0;
+		for(n=0; n<nfft; n++) {
+			if (max_energy < haystack_sig[n]) {
+				max_energy = haystack_sig[n];
+				max_n = n;
+			}
+		}
+		/* Normalize maximum energy to 1.0 */
+		max_energy /= nfft * needle_energy; 
+		match_time = ((double) max_n+n0) / needle_hdr.SampleRate;
 
-	if (max_energy > match_treshold) {
-		printf("Match found, energy %f, time %f\n", max_energy, match_time);
-	} else {
-		printf("No match found, max energy %f, time %f\n", max_energy, match_time);
-	}
+		printf("In sample from %ld to %ld (edge %ld):\n", n0,
+				(n0+nfft), (n0+nfft-n_needle));
+		printf("In time from %f to %f (edge %f):\n", (double) n0/needle_hdr.SampleRate,
+				(double) (n0+nfft) / needle_hdr.SampleRate,
+				(double) (n0+nfft-n_needle) / needle_hdr.SampleRate);
+		if (max_energy > match_treshold && max_n < (nfft-1-n_needle)) {
+			printf("Match found, energy %f, time %f, sample %ld\n", max_energy, match_time, max_n+n0);
+			break;
+		} else {
+			printf("No match found, max energy %f, time %f\n", max_energy, match_time);
+		}
 
+		/* To another iteration:
+		 *  - clean the signal
+		 *  - restore last n_needle from safe
+		 *  - read new samples from input
+		 *  - store last n_needle to safe
+		 *  - increment n0 with nfft - n_needle
+		 */
+		memset((void *) haystack_spec, 0, (nfft/2+1) * sizeof(fftw_complex));
+		memcpy((void *) haystack_sig, haystack_safe, n_needle * sizeof(double));
+		if (read_wav_data(fhaystack, &haystack_hdr, haystack_sig+n_needle, nfft-n_needle) == 0)
+			break;
+		memcpy((void *) haystack_safe, (void *) (haystack_sig+nfft-n_needle),
+				n_needle * sizeof(double));
+		n0 += nfft-n_needle;
+	}
 
 	return 0;
 }
