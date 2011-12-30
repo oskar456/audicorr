@@ -54,7 +54,7 @@ void check_wave_header(struct WAV_HEADER *wav_hdr) {
 	printf("Bits per sample: %d\n", wav_hdr->bitsPerSample);
 	printf("Bytes per sample: %d\n", wav_hdr->bytesPerSample);
 	if (wav_hdr->bitsPerSample != 8 && wav_hdr->bitsPerSample != 16) {
-		puts("Unsuported bit width, only 8 a 16 bits supported");
+		puts("Unsuported bit width, only 8 or 16 bits supported");
 		fail=1;
 	}
 	if (fail != 0) {
