@@ -70,7 +70,7 @@ long next2pow(long n) {
 	return (long) pow(2, ceil(npow));
 }
 
-long getNsamples(struct WAV_HEADER *wav_hdr) {
+long samplesnumber(struct WAV_HEADER *wav_hdr) {
 	return wav_hdr->Subchunk2Size / wav_hdr->bytesPerSample;
 }
 
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
 	}
 	check_wave_header(&needle_hdr);
 	
-	n_needle = getNsamples(&needle_hdr);
+	n_needle = samplesnumber(&needle_hdr);
 	nfft = (long) pow(2, 18); /* TODO autodetect */
 
 	needle_spec = (fftw_complex*) fftw_malloc((nfft/2+1) * sizeof(fftw_complex));
