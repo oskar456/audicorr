@@ -26,12 +26,150 @@ struct	WAV_HEADER
 }; 
 #pragma pack()
 
-long nfft;
+enum loglevel {
+	LOG_FATAL = 0, /* Always shown */
+	LOG_ERROR,     /* Could be silenced */
+	LOG_INFO,      /* Default verbosity */
+	LOG_DEBUG
+};
+
+enum loglevel conf_verbosity = LOG_INFO;
+long nfft;	/* FFT width for one iteration */
 char needle_fname[] = "needle.wav";
 double match_treshold = 0.95;
 
 
 
+/**
+ * Logger function. Show the message if current verbosity is above
+ * logged level.
+ *
+ * @param levem Message log level
+ * @param format printf style format string
+ * @returns Whatever printf returns
+ */
+int logger(enum loglevel level, const char *format, ...) {
+	va_list ap, aq;
+	int r;
+	if (conf_verbosity >= level) {
+		va_start(ap, format);
+		r=vfprintf(stderr,format, ap);
+		va_end(ap);
+		return r;
+	}
+}
+
+void usage(FILE* f) {
+	fprintf(f, 
+"Audicorr - The audio correlator\n"
+"\n"
+"Version " VERSION "\n"
+"Copyright 2011-12 Ondrej Caletka <ondrej.caletka@gmail.com>\n"
+"\n"
+"This program is free software; you can redistribute it and/or modify\n"
+"it under the terms of the GNU General Public License version 2\n"
+"as published by the Free Software Foundation.\n"
+"\n"
+"Usage:	%s [options] <needle wave file>\n"
+"\n"
+"Options:\n"
+"\t-h --help --usage		Show this help\n"
+"\t-V --version			Show program version\n"
+"\t-v --verbose			Increase verbosity\n"
+"\t-q --quiet			Report only fatal errors\n"
+"\t-i --interface <ifname>	\tUse this interface\n"
+"\t-s --source <ip or hostname>	Get stream from this source only\n"
+"\t-o --output <filename>	\tWrite to file rather than stdout\n"
+"\t-u --udponly			Stream is UDP-only, not RTP/UDP\n"
+"\t-4 --inet			Force IPv4\n"
+"\t-6 --inet6			Force IPv6\n",
+	program_invocation_short_name);
+}
+
+
+
+void parseCmdLine(int argc, char *argv[]) {
+	static const struct option longopts[] = {
+		{ "help",	no_argument,		NULL,	'h' },
+		{ "usage",	no_argument,		NULL,	'h' },
+		{ "quiet",	no_argument,		NULL,	'q' },
+		{ "verbose",	no_argument,		NULL,	'v' },
+		{ "version",	no_argument,		NULL,	'V' },
+		{ "interface",	required_argument,	NULL,	'i' },
+		{ "source",	required_argument,	NULL,	's' },
+		{ "output",	required_argument,	NULL,	'o' },
+		{ "udponly",	no_argument,		NULL,	'u' },
+		{ "inet",	no_argument,		NULL,	'4' },
+		{ "inet6",	no_argument,		NULL,	'6' },
+		{ 0,		0,			0,	0   }
+	};
+	static const char shortopts[] = "hqvVi:s:o:u46";
+
+	int option_index, opt;
+	
+	while ((opt = getopt_long(argc, argv, shortopts,
+					longopts, &option_index)) != -1) {
+		switch (opt) {
+			case 0:
+				break;
+			case 'h':
+				usage(stdout);
+				exit(EXIT_SUCCESS);
+				break;
+			case 'q':
+				conf_verbosity=0;
+				break;
+			case 'v':
+				conf_verbosity++;
+				break;
+			case 'V':
+				puts(PACKAGE " " VERSION);
+				exit(EXIT_SUCCESS);
+				break;
+			case 'i':
+				conf_interface = strdup(optarg);
+				break;
+			case 'o':
+				conf_output = strdup(optarg);
+				break;
+			case 's':
+				conf_source = strdup(optarg);
+				break;
+			case 'u':
+				conf_udponly = 1;
+				break;
+			case '4':
+				conf_family = AF_INET;
+				break;
+			case '6':
+				conf_family = AF_INET6;
+				break;
+			default:
+				usage(stderr);
+				exit(EXIT_FAILURE);
+		}
+	}
+
+	if (optind >= argc) {
+		logger(LOG_FATAL, "Error, no IP address found.\n");
+		usage(stderr);
+		exit(EXIT_FAILURE);
+	}
+	conf_IP = strdup(argv[optind]);
+
+	if (++optind < argc) {
+		conf_port = strdup(argv[optind]);
+	} else {
+		conf_port = strdup("1234");
+	}
+
+	logger(LOG_DEBUG, "Vebosity: %d, UDPonly: %d, AF: %d\n"
+			"Source: %s, Interface: %s,\n"
+			"IP: %s, port: %s\n",
+			conf_verbosity, conf_udponly, conf_family,
+			conf_source, conf_interface,
+			conf_IP, conf_port);
+}
 
 void check_wave_header(struct WAV_HEADER *wav_hdr) {
 	int fail=0;
