@@ -69,6 +69,21 @@ int logger(enum loglevel level, const char *format, ...) {
 	return 0;
 }
 
+void fatal(const char *message) {
+	logger(LOG_FATAL, "%s\n", message);
+	exit(EXIT_FAILURE);
+}
+
+void *ec_malloc(size_t size) {
+	void *ptr;
+	ptr = malloc(size);
+	if (ptr == NULL) {
+		fatal("Cannot allocate memory!");
+	}
+	return ptr;
+}
+
+
 void usage(FILE* f) {
 	fprintf(f, 
 "Audicorr - The audio correlator\n"
@@ -193,11 +208,15 @@ long read_wav_data(FILE *wavfile, struct WAV_HEADER *wav_hdr, double *signal, lo
 	int n,r;
 	char *sample;
 
+<<<<<<< HEAD
 	sample = malloc(wav_hdr->bytesPerSample);
 	if (sample == NULL) {
 		logger(LOG_FATAL, "Allocation failed.\n");
 		exit(EXIT_FAILURE);
 	}
+=======
+	sample = (char *) ec_malloc(wav_hdr->bytesPerSample);
+>>>>>>> 5eea09cd49287180ea32cacdb0e4cd4b7b8323c4
 	for(n=0; n<nmax; n++) {
 		r = fread(sample, wav_hdr->bytesPerSample, 1, wavfile);
 		if (r != 1)
