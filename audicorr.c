@@ -23,13 +23,16 @@ struct	WAV_HEADER
 	uint32_t	ChunkSize;	    /* RIFF Chunk Size = filesize-8 */
 	uint8_t		WAVE[4];	    /* WAVE Header = "WAVE"	*/
 	uint8_t		fmt[4];	    	/* FMT header  = "fmt "	*/
-	uint32_t	Subchunk1Size;  /* Size of the fmt chunk				    */
+	uint32_t	Subchunk1Size;  /* Size of the fmt chunk (at least 16)			    */
 	uint16_t	AudioFormat;    /* Audio format 1=PCM,6=mulaw,7=alaw, 257=IBM Mu-Law, 258=IBM A-Law, 259=ADPCM */
 	uint16_t	NumOfChan;	    /* Number of channels 1=Mono 2=Sterio		    */
 	uint32_t	SampleRate;     /* Sampling Frequency in Hz				    */
 	uint32_t	bytesPerSec;    /* bytes per second */
 	uint16_t	bytesPerSample; /* 2=16-bit mono, 4=16-bit stereo */
 	uint16_t	bitsPerSample;  /* Number of bits per sample      */
+};
+struct WAV_HEADER2
+{
 	uint8_t		Subchunk2ID[4]; /* = "data" */
 	uint32_t	Subchunk2Size;  /* Data length    */
 }; 
@@ -46,7 +49,7 @@ enum loglevel conf_verbosity = LOG_INFO;
 long nfft;	/* FFT width for one iteration */
 char *needle_fname;
 double match_treshold = 0.95;
-
+int match_end = 0;
 
 
 /**
@@ -98,8 +101,10 @@ void usage(FILE* f) {
 "Usage:	%s [options] <needle wave file> < <haystack wave file>\n"
 "\n"
 "Options:\n"
+"\t-e --end			Match the end of needle, rather than beginning\n"
 "\t-h --help --usage		Show this help\n"
 "\t-V --version			Show program version\n"
+"\t-t --treshold <num>		Match treshold (default 0.95)\n"
 "\t-v --verbose			Increase verbosity\n"
 "\t-q --quiet			Report only fatal errors\n",
 	program_invocation_short_name);
@@ -114,9 +119,11 @@ void parseCmdLine(int argc, char *argv[]) {
 		{ "quiet",	no_argument,		NULL,	'q' },
 		{ "verbose",	no_argument,		NULL,	'v' },
 		{ "version",	no_argument,		NULL,	'V' },
+		{ "treshold",	required_argument,	NULL,	't' },
+		{ "end",	no_argument,		NULL,	'e' },
 		{ 0,		0,			0,	0   }
 	};
-	static const char shortopts[] = "hqvV";
+	static const char shortopts[] = "hqvVt:e";
 
 	int option_index, opt;
 	
@@ -139,6 +146,13 @@ void parseCmdLine(int argc, char *argv[]) {
 				puts(PACKAGE " " VERSION);
 				exit(EXIT_SUCCESS);
 				break;
+			case 't':
+				match_treshold = atof(optarg);
+				break;
+			case 'e':
+				match_end=1;
+				break;
+
 			default:
 				usage(stderr);
 				exit(EXIT_FAILURE);
@@ -159,15 +173,17 @@ void parseCmdLine(int argc, char *argv[]) {
 
 }
 
-void check_wave_header(struct WAV_HEADER *wav_hdr) {
+
+/*Check wave header correctness
+ * Fails on a error
+ * In case of success, return number of bytes to seek to reach header2*/
+int check_wave_header(struct WAV_HEADER *wav_hdr) {
 	int fail=0;
 	if (strncmp((const char *)wav_hdr->RIFF, "RIFF", 4) != 0)
 		fail=1;
 	if (strncmp((const char *)wav_hdr->WAVE, "WAVE", 4) != 0)
 		fail=1;
 	if (strncmp((const char *)wav_hdr->fmt, "fmt ", 4) != 0)
-		fail=1;
-	if (strncmp((const char *)wav_hdr->Subchunk2ID, "data", 4) != 0)
 		fail=1;
 	if (wav_hdr->AudioFormat != 1) {
 		logger(LOG_FATAL,"Unsupported data format, only PCM supported\n");
@@ -184,11 +200,20 @@ void check_wave_header(struct WAV_HEADER *wav_hdr) {
 		fail=1;
 	}
 	if (fail != 0) {
-		logger(LOG_FATAL, "WAVE header check failed!\n");
-		exit(EXIT_FAILURE);
+		fatal("WAVE header check failed!\n");
 	}
+	return wav_hdr->Subchunk1Size - 16;
 }
 
+/**
+ * Check for data header. If other header is present, 
+ * returns number of bytes to seek the other header, otherwise returns 0
+ */
+int check_wave_header2(struct WAV_HEADER2 *wav_hdr2) {
+	if (strncmp((const char *)wav_hdr2->Subchunk2ID, "data", 4) == 0)
+		return 0;
+	return wav_hdr2->Subchunk2Size + 8;
+}
 /* Returns next bigger power of 2 */
 long next2pow(long n) { 
 	double npow;
@@ -196,8 +221,8 @@ long next2pow(long n) {
 	return (long) pow(2, ceil(npow));
 }
 
-long samplesnumber(struct WAV_HEADER *wav_hdr) {
-	return wav_hdr->Subchunk2Size / wav_hdr->bytesPerSample;
+long samplesnumber(struct WAV_HEADER *wav_hdr, struct WAV_HEADER2 *wav_hdr2) {
+	return wav_hdr2->Subchunk2Size / wav_hdr->bytesPerSample;
 }
 
 /*
@@ -208,15 +233,7 @@ long read_wav_data(FILE *wavfile, struct WAV_HEADER *wav_hdr, double *signal, lo
 	int n,r;
 	char *sample;
 
-<<<<<<< HEAD
-	sample = malloc(wav_hdr->bytesPerSample);
-	if (sample == NULL) {
-		logger(LOG_FATAL, "Allocation failed.\n");
-		exit(EXIT_FAILURE);
-	}
-=======
 	sample = (char *) ec_malloc(wav_hdr->bytesPerSample);
->>>>>>> 5eea09cd49287180ea32cacdb0e4cd4b7b8323c4
 	for(n=0; n<nmax; n++) {
 		r = fread(sample, wav_hdr->bytesPerSample, 1, wavfile);
 		if (r != 1)
@@ -235,11 +252,14 @@ int main(int argc, char *argv[])
 {
 	FILE *fneedle, *fhaystack = stdin;
 	struct WAV_HEADER needle_hdr, haystack_hdr;
+	struct WAV_HEADER2 needle_hdr2, haystack_hdr2;
 	long n_needle, n, max_n, n0;
 	fftw_plan plan, backplan;
 	fftw_complex *needle_spec, *haystack_spec;
 	double *needle_sig, *haystack_sig, *haystack_safe;
-	double needle_energy, max_energy, match_time;
+	double needle_energy, round_max_energy, round_match_time;
+	double max_energy = 0, match_time = -1;
+	int nseek;
 
 	parseCmdLine(argc, argv);
 
@@ -253,15 +273,27 @@ int main(int argc, char *argv[])
 		logger(LOG_FATAL, "Header read failure!\n");
 		exit(EXIT_FAILURE);
 	}
-	check_wave_header(&needle_hdr);
+	nseek =  check_wave_header(&needle_hdr);
+	fseek(fneedle, nseek, SEEK_CUR);
+	do {
+		if (fread(&needle_hdr2, sizeof(needle_hdr2), 1, fneedle) != 1) {
+			logger(LOG_FATAL, "Header read failure!\n");
+			exit(EXIT_FAILURE);
+		}
+		nseek = check_wave_header2(&needle_hdr2);
+		fseek(fneedle, nseek, SEEK_CUR);
+	} while (nseek > 0);
+
+
+
+
 	
-	n_needle = samplesnumber(&needle_hdr);
+	n_needle = samplesnumber(&needle_hdr, &needle_hdr2);
 	nfft = (long) pow(2, 18); /* TODO autodetect */
 
 	needle_spec = (fftw_complex*) fftw_malloc((nfft/2+1) * sizeof(fftw_complex));
 	if (needle_spec == NULL) {
-		logger(LOG_FATAL,"Allocation failed!\n");
-		exit(EXIT_FAILURE);
+		fatal("Allocation failed!\n");
 	}
 	needle_sig = (double *) needle_spec;
 
@@ -294,11 +326,19 @@ int main(int argc, char *argv[])
 		logger(LOG_FATAL, "Header read failure: %s\n", strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-	check_wave_header(&haystack_hdr);
+	nseek =  check_wave_header(&haystack_hdr);
+	fseek(fhaystack, nseek, SEEK_CUR);
+	do {
+		if (fread(&haystack_hdr2, sizeof(haystack_hdr2), 1, fhaystack) != 1) {
+			logger(LOG_FATAL, "Header read failure!\n");
+			exit(EXIT_FAILURE);
+		}
+		nseek = check_wave_header2(&haystack_hdr2);
+		fseek(fhaystack, nseek, SEEK_CUR);
+	} while (nseek > 0);
 	haystack_spec = (fftw_complex*) fftw_malloc((nfft/2+1) * sizeof(fftw_complex));
 	if (haystack_spec == NULL) {
-		logger(LOG_FATAL,"Allocation failed!\n");
-		exit(EXIT_FAILURE);
+		fatal("Allocation failed!\n");
 	}
 	haystack_sig = (double *) haystack_spec;
 	logger(LOG_DEBUG, "Preparing haystack FFT\n");
@@ -331,29 +371,34 @@ int main(int argc, char *argv[])
 		logger(LOG_DEBUG, "Computing iFFT\n");
 		fftw_execute(backplan);
 		max_n = -1;
-		max_energy = 0;
+		round_max_energy = 0;
 		for(n=0; n<nfft; n++) {
-			if (max_energy < haystack_sig[n]) {
-				max_energy = haystack_sig[n];
+			if (round_max_energy < haystack_sig[n]) {
+				round_max_energy = haystack_sig[n];
 				max_n = n;
 			}
 		}
-		/* Normalize maximum energy to 1.0 */
-		max_energy /= nfft * needle_energy; 
-		match_time = ((double) max_n+n0) / needle_hdr.SampleRate;
+		/* Normalize maximum energy to 1.0 ~ same volume on haystack and needle */
+		round_max_energy /= nfft * needle_energy; 
+		round_match_time = ((double) max_n + n0 + (match_end?n_needle:0)) /
+					needle_hdr.SampleRate;
+		if (round_max_energy > max_energy) {
+			max_energy = round_max_energy;
+			match_time = round_match_time;
+		}
 
-		logger(LOG_INFO, "In sample from %ld to %ld (edge %ld):\n", n0,
+		logger(LOG_DEBUG, "In sample from %ld to %ld (edge %ld):\n", n0,
 				(n0+nfft), (n0+nfft-n_needle));
 		logger(LOG_INFO, "In time from %f to %f (edge %f):\n", (double) n0/needle_hdr.SampleRate,
 				(double) (n0+nfft) / needle_hdr.SampleRate,
 				(double) (n0+nfft-n_needle) / needle_hdr.SampleRate);
-		if (max_energy > match_treshold && max_n < (nfft-1-n_needle)) {
-			logger(LOG_INFO, "Match found, energy %f, time %f, sample %ld\n", max_energy, match_time, max_n+n0);
-			printf("%02d:%02d:%02d.%03d\n", ((int) match_time)/3600, ((int) match_time%3600)/60,
-					((int) match_time % 60), ((int)(match_time*1000))%1000);
+		if (round_max_energy > match_treshold && max_n < (nfft-1-n_needle)) {
+			logger(LOG_INFO, "Match found, energy %f, time %f, sample %ld\n", round_max_energy,
+					round_match_time, max_n+n0);
 			break;
 		} else {
-			logger(LOG_INFO, "No match found, max energy %f, time %f\n", max_energy, match_time);
+			logger(LOG_INFO, "No match found, max energy %f, time %f\n", round_max_energy,
+					round_match_time);
 		}
 
 		/* To another iteration:
@@ -370,6 +415,13 @@ int main(int argc, char *argv[])
 		memcpy((void *) haystack_safe, (void *) (haystack_sig+nfft-n_needle),
 				n_needle * sizeof(double));
 		n0 += nfft-n_needle;
+	}
+	if (max_energy > match_treshold) {
+		printf("%02d:%02d:%02d.%03d\n", ((int) match_time)/3600, ((int) match_time%3600)/60,
+			((int) match_time % 60), ((int)(match_time*1000))%1000);
+	} else {
+		logger(LOG_INFO, "Finished, no match found. Max energy %f, time %f\n", max_energy,
+				match_time);
 	}
 
 	return 0;
