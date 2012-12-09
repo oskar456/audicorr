@@ -237,7 +237,8 @@ long compute_fft_size(long n_needle) {
  * Returns characters actually read.
  */
 long read_wav_data(FILE *wavfile, struct WAV_HEADER *wav_hdr, double *signal, long nmax) {
-	int n,r;
+	long n;
+	int r;
 	char *sample;
 
 	sample = (char *) ec_malloc(wav_hdr->bytesPerSample);
@@ -253,6 +254,21 @@ long read_wav_data(FILE *wavfile, struct WAV_HEADER *wav_hdr, double *signal, lo
 	}
 	free(sample);
 	return n;
+}
+
+/*
+ * Read at most nmax data samples. If less than nmax data samples are read,
+ * remaining space is padded with zeroes.
+ * Returns 0 if EOF, nmax else.
+ */
+long read_padded_wav_data(FILE *wavfile, struct WAV_HEADER *wav_hdr,
+						double *signal, long nmax) {
+	long read,n;
+	read = read_wav_data(wavfile, wav_hdr, signal, nmax);
+	if (read == 0) return 0;
+	for (n=read; n<nmax; n++)
+		signal[n]=0;
+	return nmax;
 }
 
 int main(int argc, char *argv[])
@@ -360,7 +376,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	
-	read_wav_data(fhaystack, &haystack_hdr, haystack_sig, nfft);
+	read_padded_wav_data(fhaystack, &haystack_hdr, haystack_sig, nfft);
 	memcpy((void *) haystack_safe, (void *) (haystack_sig+nfft-1-n_needle),
 			n_needle * sizeof(double));
 	n0 = 0;
@@ -414,7 +430,7 @@ int main(int argc, char *argv[])
 		 */
 		memset((void *) haystack_spec, 0, (nfft/2+1) * sizeof(fftw_complex));
 		memcpy((void *) haystack_sig, haystack_safe, n_needle * sizeof(double));
-		if (read_wav_data(fhaystack, &haystack_hdr, haystack_sig+n_needle, nfft-n_needle) == 0)
+		if (read_padded_wav_data(fhaystack, &haystack_hdr, haystack_sig+n_needle, nfft-n_needle) == 0)
 			break;
 		memcpy((void *) haystack_safe, (void *) (haystack_sig+nfft-n_needle),
 				n_needle * sizeof(double));
