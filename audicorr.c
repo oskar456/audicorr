@@ -392,7 +392,7 @@ int main(int argc, char *argv[])
 		fftw_execute(backplan);
 		max_n = -1;
 		round_max_energy = 0;
-		for(n=0; n<nfft; n++) {
+		for(n=0; n<nfft-n_needle; n++) {
 			if (round_max_energy < haystack_sig[n]) {
 				round_max_energy = haystack_sig[n];
 				max_n = n;
@@ -407,12 +407,11 @@ int main(int argc, char *argv[])
 			match_time = round_match_time;
 		}
 
-		logger(LOG_DEBUG, "In sample from %ld to %ld (edge %ld):\n", n0,
-				(n0+nfft), (n0+nfft-n_needle));
-		logger(LOG_INFO, "In time from %f to %f (edge %f):\n", (double) n0/needle_hdr.SampleRate,
-				(double) (n0+nfft) / needle_hdr.SampleRate,
+		logger(LOG_DEBUG, "In sample from %ld to %ld:\n", n0,
+				(n0+nfft-n_needle));
+		logger(LOG_INFO, "In time from %f to %f:\n", (double) n0/needle_hdr.SampleRate,
 				(double) (n0+nfft-n_needle) / needle_hdr.SampleRate);
-		if (round_max_energy > match_treshold && max_n < (nfft-1-n_needle)) {
+		if (round_max_energy > match_treshold) {
 			logger(LOG_INFO, "Match found, energy %f, time %f, sample %ld\n", round_max_energy,
 					round_match_time, max_n+n0);
 			break;
