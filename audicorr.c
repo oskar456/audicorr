@@ -214,15 +214,22 @@ int check_wave_header2(struct WAV_HEADER2 *wav_hdr2) {
 		return 0;
 	return wav_hdr2->Subchunk2Size + 8;
 }
-/* Returns next bigger power of 2 */
-long next2pow(long n) { 
-	double npow;
-	npow = log2((double)n);
-	return (long) pow(2, ceil(npow));
-}
 
 long samplesnumber(struct WAV_HEADER *wav_hdr, struct WAV_HEADER2 *wav_hdr2) {
 	return wav_hdr2->Subchunk2Size / wav_hdr->bytesPerSample;
+}
+
+/**
+ * Compute suitable FFT window size - a power of 2
+ * and at least 4 times multiply of needle size.
+ */
+long compute_fft_size(long n_needle) {
+	double npow;
+	long nfft;
+	npow = log2(n_needle);
+	nfft = pow(2, 2 + round(npow));
+	logger(LOG_DEBUG, "Computed FFT size: 2^(2 + %f) = %ld\n", npow, nfft);
+	return nfft;
 }
 
 /*
@@ -284,12 +291,9 @@ int main(int argc, char *argv[])
 		fseek(fneedle, nseek, SEEK_CUR);
 	} while (nseek > 0);
 
-
-
-
 	
 	n_needle = samplesnumber(&needle_hdr, &needle_hdr2);
-	nfft = (long) pow(2, 18); /* TODO autodetect */
+	nfft = compute_fft_size(n_needle);
 
 	needle_spec = (fftw_complex*) fftw_malloc((nfft/2+1) * sizeof(fftw_complex));
 	if (needle_spec == NULL) {
