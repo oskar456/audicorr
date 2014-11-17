@@ -9,8 +9,9 @@ START_JINGLE="./gott_start.wav"
 STOP_JINGLE="./gott_stop.wav"
 JINGLE_RATE="8000"
 
+FFMPEG="$(which avconv)"
 AUDICORR="../../audicorr"
-AUDICORR_ARGS="--treshold 0.8"
+AUDICORR_ARGS="--treshold 0.5"
 LAME_ARGS="--abr 160"
 TMP_FILE=$(mktemp -u /tmp/correcut.XXXXXX.wav)
 
@@ -20,7 +21,7 @@ if [[ $# -ne 2 ]]; then
 fi
 
 #find the start time
-start_time=$( ffmpeg -i "$INPUT" -ac 1 -ar $JINGLE_RATE  -f wav - </dev/null | 
+start_time=$( $FFMPEG -i "$INPUT" -ac 1 -ar $JINGLE_RATE  -f wav - </dev/null | 
 	$AUDICORR $AUDICORR_ARGS "$START_JINGLE" )
 
 if [[ "x$start_time" == "x" ]]; then
@@ -31,7 +32,7 @@ fi
 echo "Programme start found at $start_time"
 
 #find the programme length
-prog_length=$( ffmpeg -i "$INPUT" -ss $start_time -ac 1 -ar $JINGLE_RATE  -f wav - </dev/null |
+prog_length=$( $FFMPEG -i "$INPUT" -ss $start_time -ac 1 -ar $JINGLE_RATE  -f wav - </dev/null |
 		$AUDICORR $AUDICORR_ARGS --end "$STOP_JINGLE" )
 
 
@@ -42,7 +43,7 @@ fi
 
 echo "Programme length found to be $prog_length"
 
-ffmpeg -i "$INPUT" -ss $start_time -t $prog_length -f wav "$TMP_FILE"
+$FFMPEG -i "$INPUT" -ss $start_time -t $prog_length -f wav "$TMP_FILE"
 normalize --peak "$TMP_FILE"
 lame $LAME_ARGS "$TMP_FILE" "$OUTPUT"
 rm "$TMP_FILE"
