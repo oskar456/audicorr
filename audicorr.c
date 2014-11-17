@@ -212,7 +212,7 @@ int check_wave_header(struct WAV_HEADER *wav_hdr) {
 int check_wave_header2(struct WAV_HEADER2 *wav_hdr2) {
 	if (strncmp((const char *)wav_hdr2->Subchunk2ID, "data", 4) == 0)
 		return 0;
-	return wav_hdr2->Subchunk2Size + 8;
+	return wav_hdr2->Subchunk2Size;
 }
 
 long samplesnumber(struct WAV_HEADER *wav_hdr, struct WAV_HEADER2 *wav_hdr2) {
@@ -293,17 +293,21 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	if (fread(&needle_hdr, sizeof(needle_hdr), 1, fneedle) != 1) {
-		logger(LOG_FATAL, "Header read failure!\n");
+		logger(LOG_FATAL, "Needle header1 read failure!\n");
 		exit(EXIT_FAILURE);
 	}
 	nseek =  check_wave_header(&needle_hdr);
 	fseek(fneedle, nseek, SEEK_CUR);
 	do {
 		if (fread(&needle_hdr2, sizeof(needle_hdr2), 1, fneedle) != 1) {
-			logger(LOG_FATAL, "Header read failure!\n");
+			logger(LOG_FATAL, "Needle header2 read failure!\n");
 			exit(EXIT_FAILURE);
 		}
+		logger(LOG_DEBUG, "%c%c%c%c\n", needle_hdr2.Subchunk2ID[0],
+		       needle_hdr2.Subchunk2ID[1], needle_hdr2.Subchunk2ID[2],
+		       needle_hdr2.Subchunk2ID[3]);
 		nseek = check_wave_header2(&needle_hdr2);
+		logger(LOG_DEBUG, "seeking: %d\n", nseek);
 		fseek(fneedle, nseek, SEEK_CUR);
 	} while (nseek > 0);
 
